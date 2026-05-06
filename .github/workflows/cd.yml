@@ -13,7 +13,6 @@ jobs:
     steps:
       - name: Deploy on EC2
         uses: appleboy/ssh-action@v1.0.3
-
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
@@ -32,6 +31,9 @@ jobs:
               VERSION="blue-v2"
             fi
 
+            echo "Current active: $ACTIVE"
+            echo "Deploying new version to: $NEW"
+
             docker pull kanhaiya05/blue-green-demo:latest
 
             docker rm -f $NEW || true
@@ -44,8 +46,13 @@ jobs:
 
             sleep 10
 
-            docker exec nginx-proxy sh -c "sed -i 's|proxy_pass http://.*:3000;|proxy_pass http://$NEW:3000;|' /etc/nginx/conf.d/default.conf"
+            # health check
+            docker exec $NEW wget -qO- http://localhost:3000/health
 
-            docker exec nginx-proxy nginx -s reload
+            # update HOST nginx config file, not inside container
+            sed -i "s|proxy_pass http://.*:3000;|proxy_pass http://$NEW:3000;|" nginx/default.conf
+
+            # restart nginx so mounted config updates properly
+            docker restart nginx-proxy
 
             echo "Traffic switched to $NEW"
