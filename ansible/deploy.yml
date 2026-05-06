@@ -1,0 +1,54 @@
+- name: Blue Green Deployment on EC2
+  hosts: web
+  become: yes
+
+  vars:
+    app_dir: /home/ubuntu/blue-green-demo
+    docker_image: kanhaiya05/blue-green-demo:latest
+    docker_network: blue-green-demo_default
+
+  tasks:
+    - name: Check active app from nginx config
+      shell: grep "proxy_pass" {{ app_dir }}/nginx/default.conf | grep -o 'blue-app\|green-app'
+      register: active_app
+      changed_when: false
+
+    - name: Decide new inactive app
+      set_fact:
+        new_app: "{{ 'green-app' if active_app.stdout == 'blue-app' else 'blue-app' }}"
+        app_version: "{{ 'green-v2' if active_app.stdout == 'blue-app' else 'blue-v2' }}"
+
+    - name: Pull latest Docker image
+      shell: docker pull {{ docker_image }}
+
+    - name: Remove old inactive container
+      shell: docker rm -f {{ new_app }} || true
+
+    - name: Run new app container
+      shell: |
+        docker run -d \
+          --name {{ new_app }} \
+          --network {{ docker_network }} \
+          -e APP_VERSION={{ app_version }} \
+          {{ docker_image }}
+
+    - name: Wait for app to start
+      pause:
+        seconds: 10
+
+    - name: Health check new app
+      shell: docker exec {{ new_app }} wget -qO- http://localhost:3000/health
+      register: health_check
+
+    - name: Switch nginx traffic to new app
+      replace:
+        path: "{{ app_dir }}/nginx/default.conf"
+        regexp: 'proxy_pass http://.*:3000;'
+        replace: 'proxy_pass http://{{ new_app }}:3000;'
+
+    - name: Restart nginx proxy
+      shell: docker restart nginx-proxy
+
+    - name: Show deployment result
+      debug:
+        msg: "Traffic switched from {{ active_app.stdout }} to {{ new_app }}"

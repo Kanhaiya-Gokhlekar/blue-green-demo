@@ -1,4 +1,65 @@
-name: CD Pipeline
+# name: CD Pipeline
+# 
+# on:
+#   workflow_run:
+#     workflows: ["CI Pipeline"]
+#     types:
+#       - completed
+# 
+# jobs:
+#   deploy:
+#     runs-on: ubuntu-latest
+# 
+#     steps:
+#       - name: Deploy on EC2
+#         uses: appleboy/ssh-action@v1.0.3
+#         with:
+#           host: ${{ secrets.EC2_HOST }}
+#           username: ${{ secrets.EC2_USERNAME }}
+#           key: ${{ secrets.EC2_SSH_KEY }}
+# 
+#           script: |
+#             cd ~/blue-green-demo
+# 
+#             ACTIVE=$(grep "proxy_pass" nginx/default.conf | grep -o 'blue-app\|green-app')
+# 
+#             if [ "$ACTIVE" = "blue-app" ]; then
+#               NEW="green-app"
+#               VERSION="green-v2"
+#             else
+#               NEW="blue-app"
+#               VERSION="blue-v2"
+#             fi
+# 
+#             echo "Current active: $ACTIVE"
+#             echo "Deploying new version to: $NEW"
+# 
+#             docker pull kanhaiya05/blue-green-demo:latest
+# 
+#             docker rm -f $NEW || true
+# 
+#             docker run -d \
+#               --name $NEW \
+#               --network blue-green-demo_default \
+#               -e APP_VERSION=$VERSION \
+#               kanhaiya05/blue-green-demo:latest
+# 
+#             sleep 10
+# 
+#             # health check
+#             docker exec $NEW wget -qO- http://localhost:3000/health
+# 
+#             # update HOST nginx config file, not inside container
+#             sed -i "s|proxy_pass http://.*:3000;|proxy_pass http://$NEW:3000;|" nginx/default.conf
+# 
+#             # restart nginx so mounted config updates properly
+#             docker restart nginx-proxy
+# 
+#             echo "Traffic switched to $NEW"
+
+
+
+name: CD Pipeline Ansible
 
 on:
   workflow_run:
@@ -11,48 +72,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy on EC2
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USERNAME }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-          script: |
-            cd ~/blue-green-demo
+      - name: Install Ansible
+        run: |
+          sudo apt update
+          sudo apt install ansible -y
 
-            ACTIVE=$(grep "proxy_pass" nginx/default.conf | grep -o 'blue-app\|green-app')
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/ec2.pem
+          chmod 600 ~/.ssh/ec2.pem
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
-            if [ "$ACTIVE" = "blue-app" ]; then
-              NEW="green-app"
-              VERSION="green-v2"
-            else
-              NEW="blue-app"
-              VERSION="blue-v2"
-            fi
-
-            echo "Current active: $ACTIVE"
-            echo "Deploying new version to: $NEW"
-
-            docker pull kanhaiya05/blue-green-demo:latest
-
-            docker rm -f $NEW || true
-
-            docker run -d \
-              --name $NEW \
-              --network blue-green-demo_default \
-              -e APP_VERSION=$VERSION \
-              kanhaiya05/blue-green-demo:latest
-
-            sleep 10
-
-            # health check
-            docker exec $NEW wget -qO- http://localhost:3000/health
-
-            # update HOST nginx config file, not inside container
-            sed -i "s|proxy_pass http://.*:3000;|proxy_pass http://$NEW:3000;|" nginx/default.conf
-
-            # restart nginx so mounted config updates properly
-            docker restart nginx-proxy
-
-            echo "Traffic switched to $NEW"
+      - name: Run Ansible Playbook
+        run: |
+          ansible-playbook \
+            -i ansible/inventory.ini \
+            ansible/deploy.yml \
+            --private-key ~/.ssh/ec2.pem \
+            -e "ansible_host=${{ secrets.EC2_HOST }}"
