@@ -8,6 +8,7 @@ app.get("/", (req, res) => {
   res.send(`
     <h1>Blue Green Deployment Demo</h1>
     <h2>App Version: ${APP_VERSION}</h2>
+    <h2>App Version: Version 3 Deployment Success</h2>
     <p>Container is running successfully.</p>
   `);
 });
